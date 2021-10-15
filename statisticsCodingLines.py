@@ -15,8 +15,8 @@ class Record(Base):
     :Create:  2021/10/15 8:24 上午
     :Blog:    https://blog.csdn.net/qq_41376740
     Copyright (c) 2021, 河海哥 Group All Rights Reserved.
-    """    
-    
+    """
+
     __tablename__ = 'record'
 
     id = Column(INT, primary_key=True, autoincrement=True)
@@ -25,8 +25,19 @@ class Record(Base):
     suffix = Column(String(20))
     boost_number = Column(INT)
     # for the purpose of discriminating whether the data is generated due to import
-    # and the convenience of future statistics 1=yes 0=no
+    # and the convenience of future statistics, 1=yes 0=no
     import_flag = Column(INT)
+    # for exact statistics of one file or one directory
+    file_path = Column(String)
+
+    def __str__(self):
+        return """
+    total_lines: %s;
+    computing_time: %s,
+    suffix: %s,
+    boost_number: %s,
+    file_path: %s
+    """ % (self.total_lines, self.computing_time, self.suffix, self.boost_number, self.file_path)
 
 
 def get_file_line_count(absolute_file_path, *args):
@@ -60,13 +71,13 @@ def get_file_line_count(absolute_file_path, *args):
     return count
 
 
-def method(file_path, suffix):
-    dict = {
+def statistics(file_path, suffix):
+    keywords = {
         "java": ["package", "import", "}"],
         "py": []
     }
     sum_count = 0
-    args = dict.get(suffix)
+    args = keywords.get(suffix)
 
     if os.path.isdir(file_path):
         g = os.walk(file_path)
@@ -78,7 +89,7 @@ def method(file_path, suffix):
                 if file.endswith(suffix) is False:
                     continue
                 absolute_file_path = os.path.join(root, file)
-                print(absolute_file_path)
+                print("scan the file: %s" % absolute_file_path)
                 count = get_file_line_count(absolute_file_path, args)
                 sum_count += count
 
@@ -87,23 +98,25 @@ def method(file_path, suffix):
     return sum_count
 
 
-if __name__ == "__main__":
-    # read two arguments from terminal
-    directory, suffix, import_flag = sys.argv[1:4]
+def get_latest_record(now):
+    # get the latest record from db by computing_time, suffix and file_path
+    latest_record = session.query(Record) \
+        .filter(Record.computing_time <= now) \
+        .filter(Record.suffix == suffix) \
+        .filter(Record.file_path == directory) \
+        .order_by(Record.computing_time.desc()) \
+        .limit(1).one()
+    return latest_record
 
-    engine = create_engine("mysql+pymysql://root:root@localhost:3307/line_record")
-    DBSession = sessionmaker(bind=engine)
-    session = DBSession()
+
+def main():
     now = datetime.now()
+    print("welcome my baby ,time :%s" % now)
 
-    # get last record from db
+    # get latest record from db
     last_record = Record()
     try:
-        last_record = session.query(Record) \
-            .filter(Record.computing_time <= now) \
-            .filter(Record.suffix == suffix) \
-            .order_by(Record.computing_time.desc()) \
-            .limit(1).one()
+        last_record = get_latest_record(now=now)
     except NoResultFound:
         last_record.total_lines = 0
 
@@ -111,12 +124,26 @@ if __name__ == "__main__":
     if os.path.exists(directory) is False:
         print("Path does not exists")
     else:
-        total_lines = method(directory, suffix)
+        total_lines = statistics(directory, suffix)
         print("The total lines of this path is：%d" % total_lines)
+
         if total_lines > 0:
             boost_number = total_lines - last_record.total_lines
             new_record = Record(total_lines=total_lines, computing_time=now, suffix=suffix, boost_number=boost_number,
-                                import_flag=import_flag)
+                                import_flag=import_flag, file_path=directory)
             session.add(new_record)
+            print("The new record is %s" % new_record)
+            print("Store the data into MySQL")
             session.commit()
             session.close()
+
+
+if __name__ == "__main__":
+    # read three arguments from terminal
+    directory, suffix, import_flag = sys.argv[1:4]
+    print("Create session from db")
+    engine = create_engine("mysql+pymysql://root:root@localhost:3307/line_record")
+    DBSession = sessionmaker(bind=engine)
+    session = DBSession()
+    main()
+    print("hello")
